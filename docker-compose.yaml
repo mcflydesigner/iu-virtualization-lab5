@@ -1,0 +1,100 @@
+version: '3.7'
+
+services:
+
+  rabbitmq:
+    container_name: rabbitmq
+    image: "rabbitmq:3-management"
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - './rabbitmq_data:/data'
+    networks:
+      - app-net
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 30s
+      timeout: 30s
+      retries: 3
+    # Resource limits
+    mem_limit: 1024m
+    cpus: 0.5
+
+  postgresdb:
+    image: postgres:14.4
+    container_name: postgresdb
+    environment:
+      POSTGRES_USER: tvlab-user
+      POSTGRES_PASSWORD: tvlab-pass
+      POSTGRES_DB: tvlabdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres/data:/var/lib/postgresql/data
+    networks:
+      - app-net
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Resource limits
+    mem_limit: 1024m
+    cpus: 0.5
+
+  app_java_consumer:
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgresdb:
+        condition: service_healthy
+    build: ./app_msg_consumer/
+    ports:
+      - "8085:8085"
+    environment:
+      - spring.rabbitmq.host=rabbitmq
+      - spring.rabbitmq.port=5672
+      - spring.rabbitmq.password=guest
+      - spring.rabbitmq.username=guest
+      - spring.datasource.url=jdbc:postgresql://postgresdb:5432/tvlabdb
+      - spring.datasource.username=tvlab-user
+      - spring.datasource.password=tvlab-pass
+    networks:
+      - app-net
+    healthcheck:
+      test: wget --no-verbose --tries=3 --spider 127.0.0.1:8085/healthcheck || exit 1
+      interval: 10s
+      timeout: 5s
+      start_period: 40s
+    # Resource limits
+    mem_limit: 512m
+    cpus: 0.5
+
+  app_java_producer:
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgresdb:
+        condition: service_healthy
+    build: ./app_msg_producer/
+    ports:
+      - "8080:8080"
+    environment:
+      - spring.rabbitmq.host=rabbitmq
+      - spring.rabbitmq.port=5672
+      - spring.rabbitmq.password=guest
+      - spring.rabbitmq.username=guest
+    networks:
+      - app-net
+    healthcheck:
+      test: wget --no-verbose --tries=3 --spider 127.0.0.1:8080/healthcheck || exit 1
+      interval: 10s
+      timeout: 5s
+      start_period: 40s
+    # Resource limits
+    mem_limit: 512m
+    cpus: 0.5
+
+networks:
+  app-net: {}
